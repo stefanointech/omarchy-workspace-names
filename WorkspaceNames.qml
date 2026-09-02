@@ -46,11 +46,11 @@ Item {
   property var rows: []
   property bool hasSub: false
 
-  // Welche Workspaces in dieser Sitzung schon einmal belegt waren. Ein leerer
-  // Workspace existiert für Hyprland gar nicht, beim Start sieht also jeder
-  // ungenutzte Workspace leer aus -- ohne dieses Gedächtnis wären nach jedem
-  // Shell-Start reihenweise Namen weg.
-  property var seenOccupied: ({})
+  // Aufgeräumt wird erst, wenn Hyprlands Zustand wirklich steht. Beim Start
+  // meldet es Workspaces und Fenster nicht im selben Atemzug, und ein zu
+  // früher Durchlauf hielte jeden Workspace für leer -- also genau die Namen
+  // löschen, die er verschonen soll.
+  property bool occupancyReady: false
 
   property bool hudOpen: false
   property bool renameOpen: false
@@ -241,9 +241,18 @@ Item {
     namesFile.setText(JSON.stringify(next, null, 2) + "\n")
   }
 
+  // Workspaces und Fenster sind beide da -- vorher lässt sich über Leere
+  // nichts aussagen.
+  function hyprlandStateLoaded() {
+    return Hyprland.workspaces.values.length > 0 && Hyprland.toplevels.values.length > 0
+  }
+
   // Ein Name gehört zu dem, was auf dem Workspace läuft. Ist dort nichts mehr,
-  // ist er gegenstandslos -- aber nur, wenn der Workspace vorher belegt war.
+  // ist er gegenstandslos -- auch dann, wenn der Workspace schon leer war, als
+  // die Shell startete.
   function syncOccupancy() {
+    if (!root.clearNameWhenEmpty || !root.occupancyReady) return
+
     var occupied = {}
     var values = Hyprland.workspaces.values
     for (var i = 0; i < values.length; i++) {
@@ -252,17 +261,10 @@ Item {
       if (ws.toplevels && ws.toplevels.values.length > 0) occupied[String(ws.id)] = true
     }
 
-    var emptied = []
-    for (var k in root.seenOccupied)
-      if (!occupied[k]) emptied.push(k)
-
-    root.seenOccupied = occupied
-    if (!root.clearNameWhenEmpty || emptied.length === 0) return
-
     var next = {}
     var changed = false
     for (var n in root.names) {
-      if (emptied.indexOf(n) !== -1) { changed = true; continue }
+      if (!occupied[n]) { changed = true; continue }
       next[n] = root.names[n]
     }
     if (!changed) return
@@ -391,9 +393,15 @@ Item {
     }
   }
 
-  // Höchstens alle 200 ms nachzählen, und erst dann -- beim `closewindow` ist
-  // das Fenster noch in der Liste des Workspaces.
-  function scheduleOccupancy() { if (!occupancyTimer.running) occupancyTimer.start() }
+  // Höchstens alle 200 ms nachzählen, und erst verzögert -- beim `closewindow`
+  // steht das Fenster noch in der Liste seines Workspaces.
+  function scheduleOccupancy() {
+    if (!root.occupancyReady) {
+      if (root.hyprlandStateLoaded() && !readyTimer.running) readyTimer.start()
+      return
+    }
+    if (!occupancyTimer.running) occupancyTimer.start()
+  }
 
   Timer {
     id: occupancyTimer
@@ -402,9 +410,29 @@ Item {
     onTriggered: root.syncOccupancy()
   }
 
-  // Beim Start einmal den Ist-Zustand aufnehmen. Der erste Durchlauf löscht
-  // nichts, weil `seenOccupied` noch leer ist.
-  Component.onCompleted: Qt.callLater(root.syncOccupancy)
+  // Nach dem ersten Lebenszeichen von Hyprland noch eine knappe Sekunde warten,
+  // damit auch das letzte Fenster gemeldet ist, und dann erst aufräumen.
+  Timer {
+    id: readyTimer
+    interval: 800
+    repeat: false
+    onTriggered: {
+      root.occupancyReady = true
+      root.syncOccupancy()
+    }
+  }
+
+  // Bis Hyprland seinen Zustand gemeldet hat, selbst nachfragen: nach dem
+  // Start kann es beliebig lange dauern, bis ein Ereignis von allein kommt,
+  // und bis dahin bliebe der erste Aufräumlauf aus. Die Bindung an
+  // `occupancyReady` stellt den Wecker von selbst wieder ab.
+  Timer {
+    id: startupProbe
+    interval: 300
+    repeat: true
+    running: root.clearNameWhenEmpty && !root.occupancyReady
+    onTriggered: root.scheduleOccupancy()
+  }
 
   Timer {
     id: refreshTimer

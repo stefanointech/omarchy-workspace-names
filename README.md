@@ -80,11 +80,14 @@ so they survive an `omarchy plugin update`:
 | `clearNameWhenEmpty` | `false` | Forget a workspace's name once its last window is gone |
 
 `clearNameWhenEmpty` treats a name as belonging to the work on that
-workspace: close the last window and the name goes with it. It only acts on
-workspaces it has watched fill up during this shell session. An empty
-workspace does not exist as far as Hyprland is concerned, so without that
-rule every name for a workspace you happen not to be using right now would be
-wiped the moment the shell started.
+workspace: close the last window and the name goes with it. Workspaces that
+are already empty when the shell starts are cleared too, so the names you see
+always describe something that is actually running.
+
+The first sweep waits until Hyprland has reported both its workspaces and its
+windows, plus a moment to settle. Hyprland does not deliver the two together,
+and a sweep that ran too early would see every workspace as empty and throw
+away exactly the names it is meant to keep.
 
 ## Optional CLI
 
