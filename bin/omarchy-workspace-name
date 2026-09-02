@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Workspace-Namen für Omarchy verwalten.
+#
+# Die Namen liegen in ~/.config/omarchy/workspace-names.json als flaches
+# { "<workspace-id>": "<name>" }. Das Shell-Plugin stefano.workspace-names
+# beobachtet die Datei und zeigt sie im Overlay an.
+
+set -euo pipefail
+
+FILE="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/workspace-names.json"
+
+usage() {
+  cat <<'USAGE'
+Usage: omarchy-workspace-name <command> [args]
+
+  rename [n]        Umbenennen-Dialog öffnen (ohne n: aktueller Workspace)
+  set <n> <name>    Namen setzen
+  clear <n>         Namen löschen
+  get <n>           Namen ausgeben
+  list              Alle Namen ausgeben
+  show              Overlay einblenden
+  hide              Overlay ausblenden
+USAGE
+}
+
+ensure_file() {
+  [[ -f $FILE ]] || printf '{}\n' > "$FILE"
+  jq -e . "$FILE" >/dev/null 2>&1 || printf '{}\n' > "$FILE"
+}
+
+current_workspace() {
+  hyprctl -j activeworkspace 2>/dev/null | jq -r '.id' 2>/dev/null || echo 1
+}
+
+valid_id() {
+  [[ $1 =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 10 ))
+}
+
+write_json() {
+  local tmp
+  tmp=$(mktemp "$FILE.XXXXXX")
+  cat > "$tmp"
+  mv "$tmp" "$FILE"
+}
+
+cmd=${1:-rename}
+shift || true
+
+case $cmd in
+  rename)
+    id=${1:-0}
+    [[ $id == 0 ]] && id=$(current_workspace)
+    valid_id "$id" || { echo "Ungültige Workspace-ID: $id" >&2; exit 1; }
+    omarchy-shell workspace-names rename "$id"
+    ;;
+  set)
+    id=${1:-}; shift || true
+    valid_id "${id:-}" || { echo "Ungültige Workspace-ID: ${id:-}" >&2; exit 1; }
+    name=$*
+    ensure_file
+    if [[ -z $name ]]; then
+      jq --arg k "$id" 'del(.[$k]) | to_entries | sort_by(.key | tonumber) | from_entries' "$FILE" | write_json
+    else
+      jq --arg k "$id" --arg v "$name" '.[$k] = $v | to_entries | sort_by(.key | tonumber) | from_entries' "$FILE" | write_json
+    fi
+    ;;
+  clear)
+    id=${1:-}
+    valid_id "${id:-}" || { echo "Ungültige Workspace-ID: ${id:-}" >&2; exit 1; }
+    ensure_file
+    jq --arg k "$id" 'del(.[$k]) | to_entries | sort_by(.key | tonumber) | from_entries' "$FILE" | write_json
+    ;;
+  get)
+    id=${1:-}
+    valid_id "${id:-}" || { echo "Ungültige Workspace-ID: ${id:-}" >&2; exit 1; }
+    ensure_file
+    jq -r --arg k "$id" '.[$k] // ""' "$FILE"
+    ;;
+  list)
+    ensure_file
+    jq -r 'to_entries | sort_by(.key | tonumber) | .[] | "\(.key)  \(.value)"' "$FILE"
+    ;;
+  show) omarchy-shell -q workspace-names show ;;
+  hide) omarchy-shell -q workspace-names hide ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac

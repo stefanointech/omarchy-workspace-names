@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "stefanointech.workspace-names",
+  "name": "Workspace names",
+  "version": "1.0.0",
+  "author": "stefanointech",
+  "description": "Shows a strip of workspaces top-left on every workspace switch: your own names, or the apps that are open there.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "WorkspaceNames.qml"
+  }
+}
