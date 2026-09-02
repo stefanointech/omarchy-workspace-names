@@ -23,9 +23,34 @@ Item {
 
   readonly property string namesPath: Quickshell.env("HOME") + "/.config/omarchy/workspace-names.json"
 
+  // Die Shell reicht sich und das Manifest an Panel-Plugins durch.
+  property var shell: null
+  property var manifest: null
+
+  // Einstellungen stehen inline am Eintrag in ~/.config/omarchy/shell.json,
+  // nicht in dieser Datei -- so überleben sie ein `omarchy plugin update`.
+  readonly property var pluginConfig: {
+    var cfg = shell && shell.shellConfig ? shell.shellConfig : null
+    var list = cfg && Array.isArray(cfg.plugins) ? cfg.plugins : []
+    var id = manifest ? String(manifest.id || "") : ""
+    for (var i = 0; i < list.length; i++)
+      if (list[i] && String(list[i].id || "") === id) return list[i]
+    return ({})
+  }
+
+  // Standardmäßig aus: einen selbst vergebenen Namen ungefragt zu löschen ist
+  // nichts, was ein Plugin ohne Ansage tun sollte.
+  readonly property bool clearNameWhenEmpty: pluginConfig.clearNameWhenEmpty === true
+
   property var names: ({})
   property var rows: []
   property bool hasSub: false
+
+  // Welche Workspaces in dieser Sitzung schon einmal belegt waren. Ein leerer
+  // Workspace existiert für Hyprland gar nicht, beim Start sieht also jeder
+  // ungenutzte Workspace leer aus -- ohne dieses Gedächtnis wären nach jedem
+  // Shell-Start reihenweise Namen weg.
+  property var seenOccupied: ({})
 
   property bool hudOpen: false
   property bool renameOpen: false
@@ -211,6 +236,41 @@ Item {
     return total
   }
 
+  function saveNames(next) {
+    root.names = next
+    namesFile.setText(JSON.stringify(next, null, 2) + "\n")
+  }
+
+  // Ein Name gehört zu dem, was auf dem Workspace läuft. Ist dort nichts mehr,
+  // ist er gegenstandslos -- aber nur, wenn der Workspace vorher belegt war.
+  function syncOccupancy() {
+    var occupied = {}
+    var values = Hyprland.workspaces.values
+    for (var i = 0; i < values.length; i++) {
+      var ws = values[i]
+      if (ws.id < 1 || ws.id > 10) continue
+      if (ws.toplevels && ws.toplevels.values.length > 0) occupied[String(ws.id)] = true
+    }
+
+    var emptied = []
+    for (var k in root.seenOccupied)
+      if (!occupied[k]) emptied.push(k)
+
+    root.seenOccupied = occupied
+    if (!root.clearNameWhenEmpty || emptied.length === 0) return
+
+    var next = {}
+    var changed = false
+    for (var n in root.names) {
+      if (emptied.indexOf(n) !== -1) { changed = true; continue }
+      next[n] = root.names[n]
+    }
+    if (!changed) return
+
+    root.saveNames(next)
+    if (root.hudOpen) root.refresh()
+  }
+
   // ------------------------------------------------------------- Steuerung
   function showHud() {
     Hyprland.refreshWorkspaces()
@@ -261,9 +321,7 @@ Item {
     // dann selbst schreiben -- das Plugin soll ohne Fremdskript auskommen.
     // Ganzzahlige Schlüssel zählt JavaScript beim Iterieren aufsteigend
     // durch, die Datei bleibt also von allein nach Workspace sortiert.
-    root.names = next
-    namesFile.setText(JSON.stringify(next, null, 2) + "\n")
-
+    root.saveNames(next)
     root.renameOpen = false
   }
 
@@ -325,12 +383,28 @@ Item {
       if (hadPrevious && id > 0) root.showHud()
     }
 
-    // Alles andere -- neue Fenster, geschlossene Fenster -- nur nachzeichnen,
-    // solange das HUD ohnehin steht.
+    // Fenster gehen auf und zu: Belegung nachzählen, und den Streifen
+    // nachzeichnen, solange er ohnehin steht.
     function onRawEvent(event) {
+      root.scheduleOccupancy()
       if (root.hudOpen) refreshTimer.restart()
     }
   }
+
+  // Höchstens alle 200 ms nachzählen, und erst dann -- beim `closewindow` ist
+  // das Fenster noch in der Liste des Workspaces.
+  function scheduleOccupancy() { if (!occupancyTimer.running) occupancyTimer.start() }
+
+  Timer {
+    id: occupancyTimer
+    interval: 200
+    repeat: false
+    onTriggered: root.syncOccupancy()
+  }
+
+  // Beim Start einmal den Ist-Zustand aufnehmen. Der erste Durchlauf löscht
+  // nichts, weil `seenOccupied` noch leer ist.
+  Component.onCompleted: Qt.callLater(root.syncOccupancy)
 
   Timer {
     id: refreshTimer

@@ -62,6 +62,30 @@ plugin reloads the file when it changes — editing it by hand works fine:
 }
 ```
 
+## Configuration
+
+Settings live inline on the plugin's entry in `~/.config/omarchy/shell.json`,
+so they survive an `omarchy plugin update`:
+
+```json
+{
+  "plugins": [
+    { "id": "stefanointech.workspace-names", "clearNameWhenEmpty": true }
+  ]
+}
+```
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `clearNameWhenEmpty` | `false` | Forget a workspace's name once its last window is gone |
+
+`clearNameWhenEmpty` treats a name as belonging to the work on that
+workspace: close the last window and the name goes with it. It only acts on
+workspaces it has watched fill up during this shell session. An empty
+workspace does not exist as far as Hyprland is concerned, so without that
+rule every name for a workspace you happen not to be using right now would be
+wiped the moment the shell started.
+
 ## Optional CLI
 
 `bin/omarchy-workspace-name` is a convenience wrapper, not a dependency. Copy
